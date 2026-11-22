@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kestrel Range</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- ───────── HUD ───────── -->
+  <div id="hud" class="hidden">
+    <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="c"></i></div>
+    <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+    <div id="dmg-layer"></div>
+
+    <div id="scope">
+      <div class="scope-inner">
+        <svg viewBox="-100 -100 200 200" preserveAspectRatio="xMidYMid meet">
+          <line x1="-100" y1="0" x2="-6" y2="0" class="thick" /><line x1="6" y1="0" x2="100" y2="0" class="thick" />
+          <line x1="0" y1="-100" x2="0" y2="-6" class="thick" /><line x1="0" y1="6" x2="0" y2="100" class="thick" />
+          <line x1="-6" y1="0" x2="6" y2="0" class="thin" /><line x1="0" y1="-6" x2="0" y2="6" class="thin" />
+          <g class="dots">
+            <circle cx="-12" cy="0" r="0.9" /><circle cx="-24" cy="0" r="0.9" /><circle cx="-36" cy="0" r="0.9" /><circle cx="-48" cy="0" r="0.9" />
+            <circle cx="12" cy="0" r="0.9" /><circle cx="24" cy="0" r="0.9" /><circle cx="36" cy="0" r="0.9" /><circle cx="48" cy="0" r="0.9" />
+            <circle cx="0" cy="12" r="0.9" /><circle cx="0" cy="24" r="0.9" /><circle cx="0" cy="36" r="0.9" /><circle cx="0" cy="48" r="0.9" />
+            <circle cx="0" cy="-12" r="0.9" /><circle cx="0" cy="-24" r="0.9" />
+          </g>
+          <circle cx="0" cy="0" r="0.6" class="center" />
+        </svg>
+      </div>
+    </div>
+    <div id="breath"><span>HOLD SHIFT · STEADY AIM</span><div class="bar"><div id="breath-fill"></div></div></div>
+
+    <div id="stats"></div>
+    <div id="perf"></div>
+    <div id="feed"></div>
+    <div id="toast"></div>
+    <div id="hint"></div>
+    <div id="reload-bar"><div id="reload-fill"></div><span>RELOADING</span></div>
+
+    <div id="ammo">
+      <div class="ammo-row"><span id="ammo-mag">30</span><span class="sep">/</span><span id="ammo-reserve">120</span></div>
+      <div id="weapon-name">—</div>
+      <div class="ammo-sub"><span id="weapon-class"></span><span id="fire-mode"></span></div>
+    </div>
+    <div id="keys-hint">
+      <b>1–6</b> weapons · <b>Tab</b> armory · <b>R</b> reload · <b>V</b> fire mode · <b>RMB</b> aim · <b>Shift</b> sprint / hold breath · <b>C</b> crouch · <b>T</b> restock · <b>Esc</b> menu
+    </div>
+  </div>
+
+  <!-- ───────── Loading ───────── -->
+  <div id="loading" class="screen">
+    <div class="brand"><span class="mark"></span>KESTREL <em>RANGE</em></div>
+    <div class="load-bar"><div id="load-fill"></div></div>
+    <div id="load-label">Preparing…</div>
+    <div id="hw-line"></div>
+  </div>
+
+  <!-- ───────── Main menu ───────── -->
+  <div id="menu" class="screen hidden">
+    <div class="panel menu-panel">
+      <div class="brand big"><span class="mark"></span>KESTREL <em>RANGE</em></div>
+      <p class="tagline">Live-fire training ground · Stage 1</p>
+      <button id="btn-play" class="primary">Enter the range</button>
+      <div class="controls">
+        <div><kbd>W A S D</kbd> move</div><div><kbd>Mouse</kbd> look</div>
+        <div><kbd>LMB</kbd> fire</div><div><kbd>RMB</kbd> aim down sights</div>
+        <div><kbd>1–6</kbd> / <kbd>Wheel</kbd> switch weapon</div><div><kbd>Tab</kbd> armory</div>
+        <div><kbd>R</kbd> reload</div><div><kbd>V</kbd> fire mode</div>
+        <div><kbd>Shift</kbd> sprint · hold breath (scoped)</div><div><kbd>C</kbd> / <kbd>Ctrl</kbd> crouch</div>
+        <div><kbd>Space</kbd> jump</div><div><kbd>T</kbd> restock ammo</div>
+      </div>
+      <p id="menu-quality" class="muted"></p>
+    </div>
+  </div>
+
+  <!-- ───────── Pause / settings ───────── -->
+  <div id="pause" class="screen hidden">
+    <div class="panel pause-panel">
+      <div class="pause-head">
+        <div class="brand"><span class="mark"></span>PAUSED</div>
+        <div class="pause-actions">
+          <button id="btn-resume" class="primary">Resume</button>
+          <button id="btn-armory">Armory</button>
+        </div>
+      </div>
+      <div class="settings">
+        <h3>Graphics</h3>
+        <label>Quality
+          <select id="set-quality">
+            <option value="auto">Auto (recommended)</option>
+            <option value="low">Low</option><option value="medium">Medium</option>
+            <option value="high">High</option><option value="ultra">Ultra</option>
+          </select>
+        </label>
+        <div id="auto-info" class="muted small"></div>
+        <label>Target frame rate
+          <select id="set-fps"><option value="30">30 FPS</option><option value="60">60 FPS</option><option value="0">Match monitor</option></select>
+        </label>
+        <label class="check"><input type="checkbox" id="set-dynres" /> Dynamic resolution (manual quality only)</label>
+        <label class="check"><input type="checkbox" id="set-perf" /> Show performance overlay</label>
+
+        <h3>Controls</h3>
+        <label>Field of view <span id="v-fov"></span><input type="range" id="set-fov" min="80" max="115" step="1" /></label>
+        <label>Mouse sensitivity <span id="v-sens"></span><input type="range" id="set-sens" min="0.2" max="3" step="0.05" /></label>
+        <label>Aim sensitivity <span id="v-ads"></span><input type="range" id="set-ads" min="0.3" max="1.5" step="0.05" /></label>
+        <label class="check"><input type="checkbox" id="set-toggleads" /> Toggle aim (instead of hold)</label>
+
+        <h3>Audio</h3>
+        <label>Volume <span id="v-vol"></span><input type="range" id="set-vol" min="0" max="1" step="0.05" /></label>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───────── Armory ───────── -->
+  <div id="armory" class="screen hidden">
+    <div class="armory-wrap">
+      <div class="armory-head">
+        <div class="brand"><span class="mark"></span>ARMORY</div>
+        <div class="muted">Pick a weapon · <kbd>Tab</kbd> to close</div>
+      </div>
+      <div id="armory-grid"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

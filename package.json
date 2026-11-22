@@ -1,0 +1,29 @@
+{
+  "name": "vibe-games",
+  "version": "1.0.0",
+  "description": "Browser tactical shooter prototype (Three.js)",
+  "scripts": {
+    "fetch-assets": "node scripts/fetch-assets.mjs",
+    "dev": "node scripts/fetch-assets.mjs && vite",
+    "build": "node scripts/fetch-assets.mjs && vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/edamame-apvc/vibe-games.git"
+  },
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/edamame-apvc/vibe-games/issues"
+  },
+  "homepage": "https://github.com/edamame-apvc/vibe-games#readme",
+  "dependencies": {
+    "three": "^0.187.0",
+    "three-mesh-bvh": "^0.9.18"
+  },
+  "devDependencies": {
+    "vite": "^8.3.8"
+  },
+  "private": true
+}
