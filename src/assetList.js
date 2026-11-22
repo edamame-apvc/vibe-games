@@ -11,6 +11,20 @@ export const TEXTURES = {
   terrain: 'dry_ground_01',           // outer hills
   berm: 'rocky_gravel',               // earth berms / backstop
   plywood: 'plywood',                 // lane partitions
+  // Urban textures (for the upcoming combat map)
+  asphalt: 'asphalt_02',              // roads, carparks
+  pavers: 'square_concrete_pavers',   // footpaths, plazas
+  lawn: 'leafy_grass',                // grass verges, parks
+  facade: 'painted_concrete',         // micro-detail on HDB walls
+  tiles: 'concrete_tiles',            // void deck floors
+};
+
+// Which textures / models each map actually loads (everything is downloaded once).
+export const MAP_ASSETS = {
+  range: {
+    textures: ['ground', 'pad', 'wall', 'wood', 'roof', 'terrain', 'berm', 'plywood'],
+    models: null, // all
+  },
 };
 
 // Which Poly Haven maps we pull, and the local filename for each.

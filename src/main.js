@@ -28,6 +28,7 @@ async function main() {
   const hw = detectHardware();
   const manual = settings.quality !== 'auto';
   const startTier = manual ? settings.quality : hw.tier;
+  const mapId = 'range';
   $('hw-line').textContent = `Graphics: ${prettyGpu(hw.gpu)} → starting at ${PRESETS[startTier].label} quality${manual ? ' (manual)' : ` (${hw.reason})`}`;
 
   const canvas = $('game');
@@ -39,7 +40,7 @@ async function main() {
   const assets = await loadAssets(renderer, PRESETS[startTier].texRes, (k, label) => {
     $('load-fill').style.width = `${Math.round(k * 85)}%`;
     $('load-label').textContent = label;
-  });
+  }, mapId);
   $('load-label').textContent = 'Building range…';
   await nextFrame();
 
@@ -57,7 +58,7 @@ async function main() {
   const grass = buildGrass(scene);
   const effects = new Effects(scene, audio);
   const targets = new Targets(scene, audio, effects);
-  const shootables = [...world.shootables, ...targets.meshes];
+  const shootables = [...world.shootables, ...(targets ? targets.meshes : [])];
   const seen = new Set();
   for (const m of shootables) {
     if (!seen.has(m.geometry)) { seen.add(m.geometry); m.geometry.computeBoundsTree(); }
@@ -76,7 +77,8 @@ async function main() {
 
   // ── Player + weapons ──
   const input = new Input(canvas);
-  const player = new Player(world.colliders, audio);
+  const player = new Player(world.colliders, audio, { collision: world.collision || null, bounds: world.bounds || undefined });
+  if (world.spawn) { player.pos.copy(world.spawn.pos); player.yaw = world.spawn.yaw; }
   const hud = new Hud();
   const stats = { shots: 0, hits: 0, headshots: 0, downs: 0, longest: 0 };
   const ws = new WeaponSystem({ weaponScene, camera, player, effects, audio, hud, targets, shootables, stats });
@@ -97,8 +99,8 @@ async function main() {
     tier = t; scale = s;
     const preset = PRESETS[t];
     pipeline.configure(preset, s, sceneRefs);
-    pipeline.aoExclude = [grass.mesh, ...effects.aoExclude];
-    grass.setDensity(preset.grass);
+    pipeline.aoExclude = [grass?.mesh, ...(world.aoExclude || []), ...effects.aoExclude].filter(Boolean);
+    grass?.setDensity(preset.grass);
     world.setPropShadows(preset.propShadows);
     setAnisotropy(assets.allTextures, renderer, preset.anisotropy);
     effects.setLimits(preset);
@@ -119,7 +121,7 @@ async function main() {
   $('load-fill').style.width = '92%';
   await nextFrame();
   ws.allModels().forEach((g) => { g.visible = true; });
-  camera.position.set(0, 1.6, 4.5);
+  camera.position.set(player.pos.x, 1.6, player.pos.z);
   try {
     if (renderer.compileAsync) {
       await renderer.compileAsync(scene, camera);
@@ -146,6 +148,12 @@ async function main() {
   setState('menu');
   $('menu-quality').textContent = $('hw-line').textContent;
 
+
+  // Safety net: if a browser shortcut (e.g. Ctrl+W) tries to close the tab mid-game, ask first.
+  addEventListener('beforeunload', (e) => {
+    if (state === 'playing' || state === 'paused' || state === 'armory') { e.preventDefault(); e.returnValue = ''; }
+  });
+
   input.onLockChange = (locked) => {
     if (locked) setState('playing');
     else if (state === 'playing') setState('paused');
@@ -161,6 +169,20 @@ async function main() {
       if (e.code === 'Tab') play(); else setState('paused');
     }
   });
+
+  // One list of key bindings, shown on the main menu and the pause page.
+  const CONTROLS = [
+    ['W A S D', 'move'], ['Mouse', 'look'],
+    ['LMB', 'fire'], ['RMB', 'aim down sights'],
+    ['1–6 / Wheel', 'switch weapon'], ['Q', 'last weapon'],
+    ['Tab', 'armory'], ['R', 'reload'],
+    ['V', 'fire mode (auto / semi)'], ['Shift', 'crouch'],
+    ['W', 'forward (sprints automatically)'], ['Space', 'jump · hold breath (scoped)'],
+    ['T', 'restock ammo'], ['Esc', 'pause / settings'],
+  ];
+  const keysHtml = CONTROLS.map(([k, label]) =>
+    `<div>${k.split(' / ').map((x) => x.split(' ').map((y) => `<kbd>${y}</kbd>`).join(' ')).join(' / ')} ${label}</div>`).join('');
+  document.querySelectorAll('[data-controls]').forEach((el) => { el.innerHTML = keysHtml; });
 
   // first-run controls hint fades away
   setTimeout(() => $('keys-hint').classList.add('faded'), 14000);
@@ -231,7 +253,7 @@ async function main() {
   });
 
   // ── Helpers used every frame ──
-  const groundAt = (x, z) => (Math.abs(x) < 22 && z > -2.5 && z < 12.5 ? 0.02 : 0);
+  const groundAt = world.groundAt || ((x, z) => (Math.abs(x) < 22 && z > -2.5 && z < 12.5 ? 0.02 : 0));
   const sunRay = new THREE.Raycaster();
   sunRay.firstHitOnly = true;
   let sunVis = 1;
@@ -245,6 +267,8 @@ async function main() {
     hud.toast('Ammo restocked');
     audio.mech('magIn');
   }
+
+  const debugCam = { on: false, pos: new THREE.Vector3(), yaw: 0, pitch: 0 };
 
   // ── Main loop ──
   let last = performance.now();
@@ -260,13 +284,14 @@ async function main() {
 
     if (state === 'playing') {
       player.look(input.mouse.dx, input.mouse.dy, settings.sensitivity * ws.sensitivityScale(settings));
-      player.update(dt, { input, ads: ws.ads > 0.5, mobility: ws.def.mobility, canSprint: true });
+      player.update(dt, { input, ads: ws.ads > 0.5 || input.mouse.right, mobility: ws.def.mobility, canSprint: true, scoped: ws.scoped, firing: input.mouse.left || time - ws.lastShot < 0.6 });
       ws.update(dt, { input, settings, time });
       if (input.hit('KeyT')) restock();
       if (input.hit('Tab')) { setState('armory'); input.unlock(); }
     }
 
-    // camera
+    // camera (skipped when a debug free-camera is active)
+    if (!debugCam.on) {
     const bob = player.bobAmount * (1 - ws.ads * 0.8);
     camera.position.set(
       player.pos.x,
@@ -276,6 +301,7 @@ async function main() {
     const lateral = player.vel.x * Math.cos(player.yaw) - player.vel.z * Math.sin(player.yaw);
     roll += (-lateral * 0.0035 - roll) * Math.min(1, dt * 6);
     camera.rotation.set(player.pitch + ws.scopeSway.y, player.yaw + ws.scopeSway.x, roll + Math.sin(player.bobPhase) * 0.002 * bob);
+    } else { camera.position.copy(debugCam.pos); camera.rotation.set(debugCam.pitch, debugCam.yaw, 0); }
 
     // FOV: hip (from horizontal setting) → aimed / scoped
     const hipV = 2 * Math.atan(Math.tan(settings.fov * D2R / 2) / camera.aspect) / D2R;
@@ -289,8 +315,8 @@ async function main() {
 
     // world simulation
     world.update(time);
-    grass.update(time);
-    targets.update(dt);
+    grass?.update(time);
+    targets?.update(dt);
     effects.update(dt, groundAt);
     effects.setViewport(renderer.getDrawingBufferSize(new THREE.Vector2()).y, camera.fov);
 
@@ -330,6 +356,7 @@ async function main() {
     scene, camera, player, ws, auto, settings, input, targets, stats, TIERS,
     setTier: (t) => applyQuality(t, 1),
     debugPlay: () => setState('playing'), // for automated screenshots (no pointer lock)
+    debugCam,
     get tier() { return tier; }, get scale() { return scale; },
   };
 }

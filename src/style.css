@@ -52,6 +52,7 @@ button.primary:hover { background: #f4b552; }
 .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; margin-top: 28px; font-size: 14px; color: var(--muted); }
 .controls kbd { color: var(--fg); margin-right: 4px; }
 #menu-quality { margin-top: 22px; font-size: 13px; }
+.controls.compact { margin-top: 0; font-size: 13px; gap: 6px 20px; }
 
 .pause-panel { width: min(560px, 100%); }
 .pause-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }

@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
-import { TEXTURES, HDRI, MODELS } from './assetList.js';
+import { TEXTURES, HDRI, MODELS, MAP_ASSETS } from './assetList.js';
 
 const BASE = './assets/';
 
 /** Loads every texture / HDRI / model. onProgress(0..1, label) */
-export async function loadAssets(renderer, texRes, onProgress) {
+export async function loadAssets(renderer, texRes, onProgress, mapId = 'range') {
+  const need = MAP_ASSETS[mapId] || MAP_ASSETS.range;
   const manager = new THREE.LoadingManager();
   manager.onProgress = (url, loaded, total) => onProgress?.(loaded / total, url.split('/').slice(-3).join('/'));
 
@@ -18,7 +19,7 @@ export async function loadAssets(renderer, texRes, onProgress) {
   const allTextures = [];
   const promises = [];
 
-  for (const key of Object.keys(TEXTURES)) {
+  for (const key of need.textures) {
     textures[key] = {};
     for (const [slot, file] of [['map', 'diff'], ['normalMap', 'nor'], ['armMap', 'arm']]) {
       promises.push(texLoader.loadAsync(`${BASE}textures/${key}/${texRes}/${file}.jpg`).then((t) => {
@@ -39,7 +40,7 @@ export async function loadAssets(renderer, texRes, onProgress) {
   }));
 
   const models = {};
-  for (const name of MODELS) {
+  for (const name of need.models || MODELS) {
     promises.push(gltfLoader.loadAsync(`${BASE}models/${name}/${name}.gltf`).then((g) => {
       g.scene.traverse((o) => {
         if (o.isMesh) {

@@ -8,8 +8,10 @@ const STEP = 0.42;
 const GRAVITY = 13.5;
 
 export class Player {
-  constructor(colliders, audio) {
+  constructor(colliders, audio, { collision = null, bounds = BOUNDS } = {}) {
     this.colliders = colliders;
+    this.collision = collision; // polygon/segment world (city maps)
+    this.bounds = bounds;
     this.audio = audio;
     this.pos = new THREE.Vector3(0, 0, 4.5);
     this.vel = new THREE.Vector3();
@@ -25,6 +27,7 @@ export class Player {
     this.landDip = 0;
     this.landVel = 0;
     this.speed = 0;
+    this.clock = 0;
     this._box = new THREE.Box3();
   }
 
@@ -38,9 +41,10 @@ export class Player {
   }
 
   /** ctx: { input, ads, mobility, canSprint } */
-  update(dt, { input, ads, mobility, canSprint }) {
-    // Crouch (hold C or Ctrl)
-    const wantCrouch = input.down('KeyC') || input.down('ControlLeft');
+  update(dt, { input, ads, mobility, canSprint, scoped, firing }) {
+    this.clock += dt;
+    // Crouch: hold Shift (C also works). Not Ctrl: Ctrl+W is the browser's "close tab" shortcut.
+    const wantCrouch = input.down('ShiftLeft') || input.down('KeyC');
     if (wantCrouch) this.crouching = true;
     else if (this.crouching && !this.blockedAbove()) this.crouching = false;
     this.crouch += ((this.crouching ? 1 : 0) - this.crouch) * Math.min(1, dt * 12);
@@ -53,7 +57,8 @@ export class Player {
     const len = Math.hypot(fx, fz);
     if (len > 0) { fx /= len; fz /= len; }
 
-    this.sprinting = input.down('ShiftLeft') && fz < 0 && !this.crouching && !ads && canSprint && this.onGround;
+    // Auto-sprint: moving forward is sprinting, unless aiming, crouching or shooting.
+    this.sprinting = fz < -0.5 && !this.crouching && !ads && !firing && canSprint && this.onGround;
     let maxSpeed = this.sprinting ? 6.6 : 4.7;
     if (this.crouching) maxSpeed = 2.2;
     if (ads) maxSpeed *= 0.58;
@@ -68,7 +73,7 @@ export class Player {
     this.vel.x = approach(this.vel.x, tx, accel * dt);
     this.vel.z = approach(this.vel.z, tz, accel * dt);
 
-    if (input.hit('Space') && this.onGround) {
+    if (input.hit('Space') && this.onGround && !scoped) { // Space holds breath while scoped
       this.vel.y = 4.5;
       this.onGround = false;
     }
@@ -76,6 +81,10 @@ export class Player {
 
     this.moveAxis('x', this.vel.x * dt);
     this.moveAxis('z', this.vel.z * dt);
+    if (this.collision && this.collision.resolve(this.pos, RADIUS, this.height)) {
+      // lose the velocity component pushing into the wall
+      this.vel.x *= 0.9; this.vel.z *= 0.9;
+    }
 
     const prevY = this.pos.y;
     const wasAir = !this.onGround;
@@ -87,8 +96,9 @@ export class Player {
       this.audio.footstep(6, false);
     }
 
-    this.pos.x = Math.max(BOUNDS.minX, Math.min(BOUNDS.maxX, this.pos.x));
-    this.pos.z = Math.max(BOUNDS.minZ, Math.min(BOUNDS.maxZ, this.pos.z));
+    const B = this.bounds;
+    this.pos.x = Math.max(B.minX, Math.min(B.maxX, this.pos.x));
+    this.pos.z = Math.max(B.minZ, Math.min(B.maxZ, this.pos.z));
 
     // Head bob + footsteps
     this.speed = Math.hypot(this.vel.x, this.vel.z);

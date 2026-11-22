@@ -106,7 +106,8 @@ export class WeaponSystem {
 
     // ── sprint blend ──
     const sprinting = p.sprinting;
-    this.sprintBlend += ((sprinting ? 1 : 0) - this.sprintBlend) * Math.min(1, dt * 10);
+    // Snap out of the sprint pose quickly when you pull the trigger.
+    this.sprintBlend += ((sprinting ? 1 : 0) - this.sprintBlend) * Math.min(1, dt * (input.mouse.left ? 22 : 10));
 
     // ── ADS ──
     if (settings.toggleAds && input.mouse.rightPressed) this.adsToggled = !this.adsToggled;
@@ -157,7 +158,7 @@ export class WeaponSystem {
       this.recoilAccum.x = Math.max(0, this.recoilAccum.x - input.mouse.dy * 0.0022 * settings.sensitivity * this.sensitivityScale(settings));
     }
 
-    // ── sniper scope sway + hold breath (Shift) ──
+    // ── sniper scope sway + hold breath (Space) ──
     this.updateScope(dt, input);
 
     // ── viewmodel springs ──
@@ -438,7 +439,7 @@ export class WeaponSystem {
     const b = this.breath;
     const p = this.player;
     if (this.scoped) {
-      const wantHold = input.down('ShiftLeft') && b.exhausted <= 0 && b.stamina > 0;
+      const wantHold = input.down('Space') && b.exhausted <= 0 && b.stamina > 0;
       b.held = wantHold;
       if (b.held) {
         b.stamina -= dt / 4.5;

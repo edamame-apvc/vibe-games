@@ -21,9 +21,9 @@ Then open the URL it prints (usually http://localhost:5173). The first run downl
 | Tab | Armory (pick a weapon) |
 | R | Reload |
 | V | Fire mode (auto / semi) |
-| Shift | Sprint, or hold your breath while scoped |
-| C / Ctrl | Crouch |
-| Space | Jump |
+| Shift (or C) | Crouch |
+| W | Forward, sprints automatically (slows when aiming, crouching or firing) |
+| Space | Jump, or hold your breath while scoped |
 | T | Restock ammo |
 | Esc | Pause / settings |
 

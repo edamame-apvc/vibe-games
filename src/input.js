@@ -11,7 +11,7 @@ export class Input {
 
     addEventListener('keydown', (e) => {
       if (e.code === 'Tab') e.preventDefault();
-      if (this.locked && ['Space', 'ControlLeft', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(e.code)) e.preventDefault();
+      if (this.locked && ['Space', 'KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyC', 'ShiftLeft'].includes(e.code)) e.preventDefault();
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);
     });

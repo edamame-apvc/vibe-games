@@ -33,7 +33,7 @@
         </svg>
       </div>
     </div>
-    <div id="breath"><span>HOLD SHIFT · STEADY AIM</span><div class="bar"><div id="breath-fill"></div></div></div>
+    <div id="breath"><span>HOLD SPACE · STEADY AIM</span><div class="bar"><div id="breath-fill"></div></div></div>
 
     <div id="stats"></div>
     <div id="perf"></div>
@@ -48,7 +48,7 @@
       <div class="ammo-sub"><span id="weapon-class"></span><span id="fire-mode"></span></div>
     </div>
     <div id="keys-hint">
-      <b>1–6</b> weapons · <b>Tab</b> armory · <b>R</b> reload · <b>V</b> fire mode · <b>RMB</b> aim · <b>Shift</b> sprint / hold breath · <b>C</b> crouch · <b>T</b> restock · <b>Esc</b> menu
+      <b>1–6</b> weapons · <b>Tab</b> armory · <b>R</b> reload · <b>V</b> fire mode · <b>RMB</b> aim · <b>Shift</b> crouch · <b>Space</b> jump / hold breath · <b>T</b> restock · <b>Esc</b> menu
     </div>
   </div>
 
@@ -66,14 +66,7 @@
       <div class="brand big"><span class="mark"></span>KESTREL <em>RANGE</em></div>
       <p class="tagline">Live-fire training ground · Stage 1</p>
       <button id="btn-play" class="primary">Enter the range</button>
-      <div class="controls">
-        <div><kbd>W A S D</kbd> move</div><div><kbd>Mouse</kbd> look</div>
-        <div><kbd>LMB</kbd> fire</div><div><kbd>RMB</kbd> aim down sights</div>
-        <div><kbd>1–6</kbd> / <kbd>Wheel</kbd> switch weapon</div><div><kbd>Tab</kbd> armory</div>
-        <div><kbd>R</kbd> reload</div><div><kbd>V</kbd> fire mode</div>
-        <div><kbd>Shift</kbd> sprint · hold breath (scoped)</div><div><kbd>C</kbd> / <kbd>Ctrl</kbd> crouch</div>
-        <div><kbd>Space</kbd> jump</div><div><kbd>T</kbd> restock ammo</div>
-      </div>
+      <div class="controls" data-controls></div>
       <p id="menu-quality" class="muted"></p>
     </div>
   </div>
@@ -89,6 +82,9 @@
         </div>
       </div>
       <div class="settings">
+        <h3>Keys</h3>
+        <div class="controls compact" data-controls></div>
+
         <h3>Graphics</h3>
         <label>Quality
           <select id="set-quality">
