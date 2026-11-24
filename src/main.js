@@ -15,6 +15,12 @@ import { Audio } from './audio.js';
 import { Hud } from './hud.js';
 import { WeaponSystem } from './weapons/weaponSystem.js';
 import { WEAPONS } from './weapons/data.js';
+import { GrenadeSystem } from './weapons/grenades.js';
+import { buildRimba } from './maps/rimba/index.js';
+import { NavGrid } from './ai/navgrid.js';
+import { BotManager, DIFFICULTY } from './ai/bots.js';
+import { createMercenary } from './ai/botModel.js';
+import { Mission } from './game/mission.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -28,7 +34,15 @@ async function main() {
   const hw = detectHardware();
   const manual = settings.quality !== 'auto';
   const startTier = manual ? settings.quality : hw.tier;
-  const mapId = 'range';
+  const MAPS = {
+    range: { name: 'Kestrel Range', mode: 'practice' },
+    rimba: { name: 'Rimba Basin', mode: 'combat' },
+  };
+  const urlMap = new URLSearchParams(location.search).get('map');
+  const mapId = MAPS[urlMap] ? urlMap : MAPS[settings.lastMap] ? settings.lastMap : 'range';
+  const combat = MAPS[mapId].mode === 'combat';
+  settings.lastMap = mapId;
+  saveSettings(settings);
   $('hw-line').textContent = `Graphics: ${prettyGpu(hw.gpu)} → starting at ${PRESETS[startTier].label} quality${manual ? ' (manual)' : ` (${hw.reason})`}`;
 
   const canvas = $('game');
@@ -41,7 +55,7 @@ async function main() {
     $('load-fill').style.width = `${Math.round(k * 85)}%`;
     $('load-label').textContent = label;
   }, mapId);
-  $('load-label').textContent = 'Building range…';
+  $('load-label').textContent = `Building ${MAPS[mapId].name}…`;
   await nextFrame();
 
   // ── Scene ──
@@ -50,14 +64,20 @@ async function main() {
   camera.rotation.order = 'YXZ';
   scene.add(camera);
   const sky = setupSky(scene, renderer, assets.hdr);
-  scene.fog = new THREE.FogExp2(horizonColor(assets.hdr).multiplyScalar(0.85), 0.0009);
+  scene.fog = new THREE.FogExp2(horizonColor(assets.hdr).multiplyScalar(0.85), combat ? 0.0018 : 0.0009);
 
   const audio = new Audio();
   audio.volume = settings.volume;
-  const world = buildWorld(scene, assets);
-  const grass = buildGrass(scene);
+  const world = combat
+    ? await buildRimba(scene, assets, {
+      camera, sunDir: sky.sunDir,
+      onProgress: (k, label) => { $('load-fill').style.width = `${Math.round(85 + k * 5)}%`; $('load-label').textContent = label; },
+    })
+    : buildWorld(scene, assets);
+  if (world.fog) { scene.fog.color.set(world.fog.color); scene.fog.density = world.fog.density; }
+  const grass = combat ? null : buildGrass(scene);
   const effects = new Effects(scene, audio);
-  const targets = new Targets(scene, audio, effects);
+  const targets = combat ? null : new Targets(scene, audio, effects);
   const shootables = [...world.shootables, ...(targets ? targets.meshes : [])];
   const seen = new Set();
   for (const m of shootables) {
@@ -77,12 +97,34 @@ async function main() {
 
   // ── Player + weapons ──
   const input = new Input(canvas);
-  const player = new Player(world.colliders, audio, { collision: world.collision || null, bounds: world.bounds || undefined });
+  const player = new Player(world.colliders, audio, { collision: world.collision || null, bounds: world.bounds || undefined, groundAt: world.groundAt, speedAt: world.speedAt });
   if (world.spawn) { player.pos.copy(world.spawn.pos); player.yaw = world.spawn.yaw; }
   const hud = new Hud();
   const stats = { shots: 0, hits: 0, headshots: 0, downs: 0, longest: 0 };
   const ws = new WeaponSystem({ weaponScene, camera, player, effects, audio, hud, targets, shootables, stats });
   hud.weaponChanged(ws.def);
+  let shake = 0;
+  const grenades = new GrenadeSystem({
+    scene, weaponScene, camera, player, effects, audio, hud, targets, shootables, ws, stats,
+    onExplosion: (pos, dist) => { shake = Math.max(shake, Math.max(0, 1 - dist / 40)); mission?.playerBlast(pos); },
+  });
+
+  // ── Combat: navigation, mercenaries, mission ──
+  let nav = null, bots = null, mission = null, pendingEnd = null, deathT = 0, noiseT = 0;
+  if (combat) {
+    $('load-label').textContent = 'Mapping walkable ground…';
+    await nextFrame();
+    nav = new NavGrid(world.bounds, world.walkable, 1.0);
+    bots = new BotManager({
+      scene, world, nav, player, camera, effects, audio, hud, shootables, difficulty: settings.difficulty,
+      onPlayerHit: (dmg, from, head) => mission.playerHit(dmg, from, head),
+      onKill: () => mission.onKill(),
+    });
+    mission = new Mission({ bots, player, hud, audio, stats, onEnd: (result, summary) => endMission(result, summary) });
+    grenades.extraTargets = [bots];
+    ws.onFire = (origin) => bots.alertShot(origin);
+  }
+  hud.setCombat(combat);
 
   // ── Quality ──
   let tier = startTier, scale = 1;
@@ -102,6 +144,7 @@ async function main() {
     pipeline.aoExclude = [grass?.mesh, ...(world.aoExclude || []), ...effects.aoExclude].filter(Boolean);
     grass?.setDensity(preset.grass);
     world.setPropShadows(preset.propShadows);
+    world.setQuality?.(preset, t);
     setAnisotropy(assets.allTextures, renderer, preset.anisotropy);
     effects.setLimits(preset);
     updateQualityText();
@@ -121,7 +164,10 @@ async function main() {
   $('load-fill').style.width = '92%';
   await nextFrame();
   ws.allModels().forEach((g) => { g.visible = true; });
-  camera.position.set(player.pos.x, 1.6, player.pos.z);
+  grenades.hand.visible = true;
+  camera.position.set(player.pos.x, player.pos.y + 1.6, player.pos.z);
+  const warm = combat ? createMercenary(0) : null; // compile the enemy materials up front
+  if (warm) { warm.root.position.set(player.pos.x, player.pos.y, player.pos.z - 4); scene.add(warm.root); }
   try {
     if (renderer.compileAsync) {
       await renderer.compileAsync(scene, camera);
@@ -132,15 +178,17 @@ async function main() {
     }
   } catch (e) { console.warn('precompile', e); }
   ws.allModels().forEach((g, i) => { g.visible = i === ws.index; });
+  grenades.hand.visible = false;
+  if (warm) scene.remove(warm.root);
   $('load-fill').style.width = '100%';
 
   // ── UI / state machine ──
   let state = 'menu';
-  const screens = { menu: $('menu'), paused: $('pause'), armory: $('armory') };
+  const screens = { menu: $('menu'), paused: $('pause'), armory: $('armory'), ended: $('endscreen') };
   function setState(s) {
     state = s;
     for (const [k, el] of Object.entries(screens)) el.classList.toggle('hidden', k !== s);
-    hud.show(s === 'playing' || s === 'paused' || s === 'armory');
+    hud.show(s === 'playing' || s === 'paused' || s === 'armory' || s === 'dying');
     if (s === 'paused') syncSettingsUI();
     if (s === 'armory') buildArmory();
   }
@@ -151,7 +199,7 @@ async function main() {
 
   // Safety net: if a browser shortcut (e.g. Ctrl+W) tries to close the tab mid-game, ask first.
   addEventListener('beforeunload', (e) => {
-    if (state === 'playing' || state === 'paused' || state === 'armory') { e.preventDefault(); e.returnValue = ''; }
+    if (state === 'playing' || state === 'paused' || state === 'armory' || state === 'dying') { e.preventDefault(); e.returnValue = ''; }
   });
 
   input.onLockChange = (locked) => {
@@ -159,10 +207,71 @@ async function main() {
     else if (state === 'playing') setState('paused');
   };
   const play = () => { audio.init(); audio.setVolume(settings.volume); input.lock(); };
-  $('btn-play').onclick = play;
+
+  // ── Main menu: map choice + mission options ──
+  document.querySelectorAll('[data-map]').forEach((btn) => {
+    btn.classList.toggle('selected', btn.dataset.map === mapId);
+    btn.onclick = () => {
+      if (btn.dataset.map === mapId) return;
+      settings.lastMap = btn.dataset.map;
+      saveSettings(settings);
+      location.search = `?map=${btn.dataset.map}`;
+    };
+  });
+  $('combat-opts').classList.toggle('hidden', !combat);
+  $('btn-play').textContent = combat ? 'Deploy' : 'Enter the range';
+  const syncMissionUI = () => {
+    $('set-enemies').value = settings.enemyCount;
+    $('v-enemies').textContent = settings.enemyCount;
+    document.querySelectorAll('[data-diff]').forEach((b) => b.classList.toggle('on', b.dataset.diff === settings.difficulty));
+  };
+  $('set-enemies').addEventListener('input', (e) => { settings.enemyCount = Number(e.target.value); saveSettings(settings); syncMissionUI(); });
+  document.querySelectorAll('[data-diff]').forEach((b) => { b.onclick = () => { settings.difficulty = b.dataset.diff; saveSettings(settings); syncMissionUI(); }; });
+  syncMissionUI();
+
+  function resetLoadout() {
+    for (const s of ws.slots) { s.ammo = s.def.mag; s.reserve = s.def.reserve; }
+    grenades.restock();
+  }
+  function startMission() {
+    Object.assign(stats, { shots: 0, hits: 0, headshots: 0, downs: 0, longest: 0, kills: 0, damageTaken: 0 });
+    bots.diff = DIFFICULTY[settings.difficulty] || DIFFICULTY.regular;
+    resetLoadout();
+    pendingEnd = null; deathT = 0;
+    mission.start(settings.enemyCount, world.spawn);
+    hud.toast(`Clear ${MAPS[mapId].name} · ${bots.total} hostiles`);
+  }
+  const deploy = () => {
+    if (combat && (!mission.active || mission.ended)) startMission();
+    play();
+  };
+  function endMission(result, summary) {
+    pendingEnd = { result, summary, t: result === 'dead' ? 1.8 : 1.4 };
+    if (result === 'dead') setState('dying');
+    else hud.toast('Area cleared');
+  }
+  function showEnd({ result, summary }) {
+    const won = result === 'won';
+    $('end-title').textContent = won ? 'AREA CLEARED' : 'KILLED IN ACTION';
+    $('end-title').className = 'brand big ' + (won ? 'won' : 'lost');
+    $('end-sub').textContent = won
+      ? `${MAPS[mapId].name} secured · ${DIFFICULTY[settings.difficulty].label}`
+      : `${summary.total - summary.kills} hostile${summary.total - summary.kills === 1 ? '' : 's'} remaining`;
+    const m = Math.floor(summary.time / 60), s = Math.floor(summary.time % 60);
+    $('end-stats').innerHTML = [
+      [`${summary.kills}/${summary.total}`, 'Kills'], [`${m}:${String(s).padStart(2, '0')}`, 'Time'], [`${summary.accuracy}%`, 'Accuracy'],
+      [summary.headshots, 'Headshots'], [summary.damageTaken, 'Damage taken'], [DIFFICULTY[settings.difficulty].label, 'Difficulty'],
+    ].map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('');
+    input.unlock();
+    setState('ended');
+  }
+  $('btn-retry').onclick = () => { startMission(); play(); };
+  $('btn-menu').onclick = () => setState('menu');
+  $('btn-quit').onclick = () => { if (mission) { mission.active = false; mission.ended = true; bots.removeAll(); } setState('menu'); };
+  $('btn-play').onclick = deploy;
   $('btn-resume').onclick = play;
   $('btn-armory').onclick = () => setState('armory');
-  canvas.addEventListener('click', () => { if (state === 'paused' || state === 'menu') play(); });
+  canvas.addEventListener('click', () => { if (state === 'paused') play(); else if (state === 'menu') deploy(); });
   addEventListener('keydown', (e) => {
     if (state === 'armory' && (e.code === 'Tab' || e.code === 'Escape')) {
       e.preventDefault();
@@ -178,7 +287,8 @@ async function main() {
     ['Tab', 'armory'], ['R', 'reload'],
     ['V', 'fire mode (auto / semi)'], ['Shift', 'crouch'],
     ['W', 'forward (sprints automatically)'], ['Space', 'jump · hold breath (scoped)'],
-    ['T', 'restock ammo'], ['Esc', 'pause / settings'],
+    ['G', 'grenade — then LMB throw / RMB lob (hold to cook)'], ['T', 'restock ammo & grenades'],
+    ['Esc', 'pause / settings'],
   ];
   const keysHtml = CONTROLS.map(([k, label]) =>
     `<div>${k.split(' / ').map((x) => x.split(' ').map((y) => `<kbd>${y}</kbd>`).join(' ')).join(' / ')} ${label}</div>`).join('');
@@ -264,6 +374,7 @@ async function main() {
 
   function restock() {
     for (const s of ws.slots) { s.ammo = s.def.mag; s.reserve = s.def.reserve; }
+    grenades.restock();
     hud.toast('Ammo restocked');
     audio.mech('magIn');
   }
@@ -286,9 +397,23 @@ async function main() {
       player.look(input.mouse.dx, input.mouse.dy, settings.sensitivity * ws.sensitivityScale(settings));
       player.update(dt, { input, ads: ws.ads > 0.5 || input.mouse.right, mobility: ws.def.mobility, canSprint: true, scoped: ws.scoped, firing: input.mouse.left || time - ws.lastShot < 0.6 });
       ws.update(dt, { input, settings, time });
+      grenades.update(dt, input);
       if (input.hit('KeyT')) restock();
       if (input.hit('Tab')) { setState('armory'); input.unlock(); }
+      if (combat && player.sprinting) {
+        noiseT -= dt;
+        if (noiseT <= 0) { noiseT = 0.6; bots.alertShot(player.pos, 0.13); } // running footsteps carry ~18 m
+      }
     }
+    if (combat && (state === 'playing' || state === 'dying')) {
+      bots.update(dt);
+      mission.update(dt);
+    }
+    if (pendingEnd) {
+      pendingEnd.t -= dt;
+      if (pendingEnd.t <= 0) { const p = pendingEnd; pendingEnd = null; showEnd(p); }
+    }
+    if (state === 'dying') deathT += dt;
 
     // camera (skipped when a debug free-camera is active)
     if (!debugCam.on) {
@@ -300,7 +425,20 @@ async function main() {
     );
     const lateral = player.vel.x * Math.cos(player.yaw) - player.vel.z * Math.sin(player.yaw);
     roll += (-lateral * 0.0035 - roll) * Math.min(1, dt * 6);
-    camera.rotation.set(player.pitch + ws.scopeSway.y, player.yaw + ws.scopeSway.x, roll + Math.sin(player.bobPhase) * 0.002 * bob);
+    const sk = shake * shake;
+    camera.rotation.set(
+      player.pitch + ws.scopeSway.y + (Math.random() - 0.5) * sk * 0.05,
+      player.yaw + ws.scopeSway.x + (Math.random() - 0.5) * sk * 0.05,
+      roll + Math.sin(player.bobPhase) * 0.002 * bob + (Math.random() - 0.5) * sk * 0.03,
+    );
+    shake = Math.max(0, shake - dt * 1.4);
+    if (deathT > 0) { // collapse to the ground
+      const k = Math.min(1, deathT / 0.9);
+      const e = k * k * (3 - 2 * k);
+      camera.position.y -= e * (player.eyeHeight - 0.3);
+      camera.rotation.z += e * 0.9;
+      camera.rotation.x -= e * 0.25;
+    }
     } else { camera.position.copy(debugCam.pos); camera.rotation.set(debugCam.pitch, debugCam.yaw, 0); }
 
     // FOV: hip (from horizontal setting) → aimed / scoped
@@ -343,7 +481,7 @@ async function main() {
       perfText = `${Math.round(auto.lastFps || 0)} FPS · ${PRESETS[tier].label}${settings.quality === 'auto' ? ' (Auto)' : ''} · ${Math.round(scale * 100)}% res${gpu}`;
       if (state === 'paused') updateQualityText();
     }
-    if (state !== 'menu') hud.update(dt, { ws, camera, stats, perfText, showPerf: settings.showPerf });
+    if (state !== 'menu') hud.update(dt, { ws, camera, stats, perfText, showPerf: settings.showPerf, grenades, player });
 
     const gpuMs = pipeline.render(time, 0.28 + ws.ads * 0.18);
     if (state === 'playing') { auto.sample(frameMs, gpuMs); auto.update(dt); }
@@ -353,7 +491,8 @@ async function main() {
 
   // Expose a few things for debugging in the browser console.
   window.__game = {
-    scene, camera, player, ws, auto, settings, input, targets, stats, TIERS,
+    scene, camera, player, ws, auto, settings, input, targets, stats, TIERS, grenades, bots, mission, nav, world,
+    startMission: () => startMission(),
     setTier: (t) => applyQuality(t, 1),
     debugPlay: () => setState('playing'), // for automated screenshots (no pointer lock)
     debugCam,

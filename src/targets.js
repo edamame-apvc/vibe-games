@@ -209,6 +209,26 @@ export class Targets {
     return { counted: false };
   }
 
+  /** Blast damage. clearLine(from, to) is true when nothing solid is in between. */
+  explosion(pos, radius, clearLine, listener) {
+    const out = [];
+    const consider = (t, point) => {
+      const d = point.distanceTo(pos);
+      if (d > radius) return;
+      let dmg = Math.round(180 * Math.pow(1 - d / radius, 1.3));
+      if (!clearLine(pos.clone().add(new THREE.Vector3(0, 0.15, 0)), point)) dmg = Math.round(dmg * 0.25);
+      if (dmg < 5) return;
+      const r = this.hit(t, 'torso', dmg, listener.distanceTo(point));
+      out.push({ ...r, damage: dmg, point });
+    };
+    for (const t of this.list) {
+      if (t.type === 'silhouette' && !t.down) consider(t, t.base.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 1.1, 0)));
+      else if (t.type === 'rack') { for (const p of t.plates) if (!p.down) consider(p, p.pivot.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.13, 0))); }
+      else if (t.type === 'gong') consider(t, t.pivot.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.85, 0)));
+    }
+    return out;
+  }
+
   update(dt) {
     for (const t of this.list) {
       if (t.type === 'silhouette') {

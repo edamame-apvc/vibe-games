@@ -10,9 +10,16 @@ export class Hud {
       mag: $('ammo-mag'), reserve: $('ammo-reserve'), name: $('weapon-name'), mode: $('fire-mode'), cls: $('weapon-class'),
       reload: $('reload-bar'), reloadFill: $('reload-fill'), feed: $('feed'), toast: $('toast'),
       stats: $('stats'), perf: $('perf'), scope: $('scope'), breath: $('breath'), breathFill: $('breath-fill'),
-      hint: $('hint'), ammoBox: $('ammo'),
+      hint: $('hint'), ammoBox: $('ammo'), grenades: $('grenades'), danger: $('danger-layer'),
+      health: $('health'), healthFill: $('health-fill'), healthNum: $('health-num'), mission: $('mission'),
+      vignette: $('hurt-vignette'), indLayer: $('ind-layer'),
     };
     this.numbers = [];
+    this.indicators = [];
+    this.hurtFlash = 0;
+    this.combat = false;
+    this.dangerEls = [];
+    this.lastGrenades = -1;
     this.hitTimer = 0;
     this.toastTimer = 0;
     this.pulse = 0;
@@ -20,6 +27,27 @@ export class Hud {
   }
 
   show(on) { this.el.hud.classList.toggle('hidden', !on); }
+
+  setCombat(on) {
+    this.combat = on;
+    this.el.health.classList.toggle('hidden', !on);
+    this.el.mission.classList.toggle('hidden', !on);
+  }
+
+  mission(alive, total, time) {
+    const m = Math.floor(time / 60), s = Math.floor(time % 60);
+    this.el.mission.innerHTML = `<span class="m-label">ENEMIES</span> <b>${alive}</b><span class="m-total">/${total}</span><span class="m-time">${m}:${String(s).padStart(2, '0')}</span>`;
+  }
+
+  /** Took damage from a world position: red flash + arrow pointing at the shooter. */
+  hurt(fromPos, dmg) {
+    this.hurtFlash = Math.min(1, this.hurtFlash + dmg / 35);
+    const el = document.createElement('div');
+    el.className = 'ind';
+    this.el.indLayer.appendChild(el);
+    this.indicators.push({ el, from: fromPos.clone(), t: 0 });
+    if (this.indicators.length > 8) this.indicators.shift().el.remove();
+  }
 
   weaponChanged(def) {
     this.el.name.textContent = def.name;
@@ -65,7 +93,28 @@ export class Hud {
   reloadProgress(k) { this.el.reloadFill.style.width = `${Math.min(100, k * 100)}%`; }
   reloadDone() { this.el.reload.classList.remove('show'); }
 
-  update(dt, { ws, camera, stats, perfText, showPerf }) {
+  update(dt, { ws, camera, stats, perfText, showPerf, grenades, player }) {
+    // health, damage vignette, direction indicators (combat maps)
+    if (this.combat) {
+      const hp = Math.max(0, player.health);
+      this.el.healthFill.style.width = `${hp}%`;
+      this.el.healthNum.textContent = Math.ceil(hp);
+      this.el.health.classList.toggle('low', hp < 35);
+      this.hurtFlash = Math.max(0, this.hurtFlash - dt * 1.6);
+      const low = hp < 40 ? (1 - hp / 40) * (0.55 + Math.sin(performance.now() / 260) * 0.15) : 0;
+      this.el.vignette.style.opacity = Math.min(1, this.hurtFlash * 0.8 + low);
+      const inv = camera.quaternion.clone().invert();
+      for (let i = this.indicators.length - 1; i >= 0; i--) {
+        const ind = this.indicators[i];
+        ind.t += dt;
+        if (ind.t > 1.6) { ind.el.remove(); this.indicators.splice(i, 1); continue; }
+        const local = ind.from.clone().sub(camera.position).applyQuaternion(inv);
+        const ang = Math.atan2(local.x, -local.z);
+        ind.el.style.transform = `translate(-50%, -50%) rotate(${ang}rad) translateY(-130px)`;
+        ind.el.style.opacity = Math.min(1, (1.6 - ind.t) * 1.5);
+      }
+    }
+
     const d = ws.def, s = ws.cur;
 
     // crosshair: gap reflects the real bullet spread at the current FOV
@@ -85,8 +134,43 @@ export class Hud {
     this.el.mag.classList.toggle('low', s.ammo <= Math.ceil(d.mag * 0.25));
     const needReload = s.ammo <= Math.ceil(d.mag * 0.2) && s.reserve > 0 && !ws.reload;
     const empty = s.ammo === 0 && s.reserve === 0;
-    this.el.hint.textContent = empty ? 'OUT OF AMMO — press T to restock' : needReload ? 'R  RELOAD' : '';
-    this.el.hint.classList.toggle('show', empty || needReload);
+    const cooking = grenades && grenades.pinPulled && grenades.state === 'cook';
+    const holding = grenades && (grenades.state === 'raise' || grenades.state === 'ready');
+    this.el.hint.textContent = cooking ? `RELEASE TO ${grenades.underhand ? 'LOB' : 'THROW'} · ${Math.max(0, grenades.fuseLeft).toFixed(1)}s`
+      : holding ? 'LMB THROW · RMB LOB · G PUT AWAY'
+      : empty ? 'OUT OF AMMO — press T to restock' : needReload ? 'R  RELOAD' : '';
+    this.el.hint.classList.toggle('show', !!(cooking || holding || empty || needReload));
+    this.el.hint.classList.toggle('danger', !!(cooking && grenades.fuseLeft < 1.2));
+
+    // grenade count
+    if (grenades && grenades.count !== this.lastGrenades) {
+      this.lastGrenades = grenades.count;
+      this.el.grenades.innerHTML = [0, 1, 2].map((i) => `<i class="gicon${i < grenades.count ? '' : ' empty'}"></i>`).join('');
+    }
+
+    // live grenade warnings (within 12 m)
+    const dangers = grenades ? grenades.dangers().filter((p) => p.distanceTo(player.pos) < 12) : [];
+    while (this.dangerEls.length < dangers.length) {
+      const d = document.createElement('div');
+      d.className = 'danger';
+      d.innerHTML = '<i></i><span></span>';
+      this.el.danger.appendChild(d);
+      this.dangerEls.push(d);
+    }
+    this.dangerEls.forEach((el, i) => {
+      const p = dangers[i];
+      el.style.display = p ? 'block' : 'none';
+      if (!p) return;
+      this.v.copy(p).project(camera);
+      let x = this.v.x, y = this.v.y;
+      if (this.v.z > 1) { x = -x; y = -y; } // behind you: mirror toward the screen edge
+      const m = Math.max(Math.abs(x), Math.abs(y), 1e-3);
+      if (m > 0.85 || this.v.z > 1) { x = (x / m) * 0.85; y = (y / m) * 0.85; }
+      const dist = p.distanceTo(player.pos);
+      el.style.transform = `translate(${(x * 0.5 + 0.5) * innerWidth}px, ${(-y * 0.5 + 0.5) * innerHeight}px) translate(-50%, -50%)`;
+      el.classList.toggle('lethal', dist < 7);
+      el.lastChild.textContent = `${dist.toFixed(0)}m`;
+    });
 
     // hitmarker
     this.hitTimer -= dt;

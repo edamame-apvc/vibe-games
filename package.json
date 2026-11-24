@@ -19,6 +19,7 @@
   },
   "homepage": "https://github.com/edamame-apvc/vibe-games#readme",
   "dependencies": {
+    "@dgreenheck/ez-tree": "^1.1.0",
     "three": "^0.187.0",
     "three-mesh-bvh": "^0.9.18"
   },

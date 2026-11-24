@@ -103,7 +103,14 @@ function holeTexture(kind) {
   c.width = c.height = 128;
   const x = c.getContext('2d');
   const cx = 64;
-  if (kind === 'metal') {
+  if (kind === 'scorch') {
+    for (let i = 0; i < 26; i++) {
+      const a = Math.random() * Math.PI * 2, r = 20 + Math.random() * 42;
+      const g = x.createRadialGradient(cx + Math.cos(a) * r * 0.4, cx + Math.sin(a) * r * 0.4, 0, cx, cx, r);
+      g.addColorStop(0, 'rgba(12,10,8,0.55)'); g.addColorStop(1, 'rgba(20,16,12,0)');
+      x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+    }
+  } else if (kind === 'metal') {
     const g = x.createRadialGradient(cx, cx, 2, cx, cx, 40);
     g.addColorStop(0, 'rgba(40,40,40,1)'); g.addColorStop(0.25, 'rgba(210,210,205,0.95)');
     g.addColorStop(0.5, 'rgba(150,150,145,0.6)'); g.addColorStop(1, 'rgba(120,120,120,0)');
@@ -167,7 +174,7 @@ export class Effects {
     this.decalLimit = 200;
 
     this.decalMats = {};
-    for (const k of ['dirt', 'concrete', 'wood', 'metal', 'paint']) {
+    for (const k of ['dirt', 'concrete', 'wood', 'metal', 'paint', 'scorch']) {
       this.decalMats[k] = new THREE.MeshStandardMaterial({
         map: holeTexture(k), transparent: true, depthWrite: false, roughness: k === 'metal' ? 0.3 : 0.95,
         metalness: k === 'metal' ? 0.8 : 0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
@@ -200,6 +207,8 @@ export class Effects {
     this.shellGroup = new THREE.Group();
     scene.add(this.shellGroup);
 
+    this.boomLight = new THREE.PointLight(0xffa050, 0, 45, 2);
+    scene.add(this.boomLight);
     this.muzzleLight = new THREE.PointLight(0xffb066, 0, 9, 2);
     scene.add(this.muzzleLight);
     this.flashTex = flashTexture();
@@ -290,6 +299,17 @@ export class Effects {
     const rnd = (s) => (Math.random() - 0.5) * s;
     const along = (speed, spreadAmt) => n.clone().multiplyScalar(speed).add(new THREE.Vector3(rnd(spreadAmt), rnd(spreadAmt) + spreadAmt * 0.3, rnd(spreadAmt)));
 
+    if (surface === 'flesh') {
+      for (let i = 0; i < 7; i++) {
+        this.dust.spawn({
+          p: point.clone().addScaledVector(n, 0.05), vel: along(0.6 + Math.random() * 1.5, 1.2), life: 0.35 + Math.random() * 0.3,
+          size: (0.08 + Math.random() * 0.1) * far, grow: 2.2, alpha: 0.7, drag: 3, gravity: 2,
+          color: new THREE.Color(0.32, 0.03, 0.025),
+        });
+      }
+      this.audio.impact('rubber', distance);
+      return;
+    }
     if (surface === 'metal' || surface === 'steel') {
       const count = surface === 'steel' ? 16 : 10;
       for (let i = 0; i < count; i++) {
@@ -343,7 +363,75 @@ export class Effects {
     }
   }
 
+  /** Grenade / frag explosion. */
+  explosion(pos, normal, distance) {
+    const n = normal.clone();
+    const rnd = (s) => (Math.random() - 0.5) * s;
+    const far = Math.max(1, distance / 60);
+    this.boomLight.position.copy(pos).addScaledVector(n, 0.8);
+    this.boomLight.intensity = 1600;
+    // fireball
+    for (let i = 0; i < 26; i++) {
+      const dir = new THREE.Vector3(rnd(2), rnd(2) + 0.6, rnd(2)).normalize();
+      this.sparks.spawn({
+        p: pos.clone().addScaledVector(n, 0.3).add(new THREE.Vector3(rnd(0.6), rnd(0.4), rnd(0.6))),
+        vel: dir.multiplyScalar(2 + Math.random() * 6).addScaledVector(n, 2), life: 0.16 + Math.random() * 0.22,
+        size: (0.9 + Math.random() * 1.4) * far, grow: 1.3, alpha: 1, drag: 5, fadePow: 0.6,
+        color: new THREE.Color(7, 3 + Math.random() * 1.5, 0.8),
+      });
+    }
+    // embers / fragments
+    for (let i = 0; i < 40; i++) {
+      const dir = new THREE.Vector3(rnd(2), Math.random() * 1.2, rnd(2)).normalize();
+      this.sparks.spawn({
+        p: pos.clone().addScaledVector(n, 0.15), vel: dir.multiplyScalar(8 + Math.random() * 22), life: 0.3 + Math.random() * 0.8,
+        size: 0.03 * far, alpha: 1, gravity: 9.8, drag: 1.5, fadePow: 0.5, floor: pos.y - 0.2,
+        color: new THREE.Color(5, 2.2, 0.6),
+      });
+    }
+    // smoke column
+    for (let i = 0; i < 20; i++) {
+      const s = 0.32 + Math.random() * 0.12;
+      this.dust.spawn({
+        p: pos.clone().addScaledVector(n, 0.5).add(new THREE.Vector3(rnd(1.2), Math.random() * 0.8, rnd(1.2))),
+        vel: new THREE.Vector3(rnd(2.5), 1.2 + Math.random() * 2.4, rnd(2.5)), life: 3 + Math.random() * 3.5,
+        size: (1.3 + Math.random() * 1.3) * far, grow: 2.6, alpha: 0.55, drag: 1.1, gravity: -0.35, fadeIn: true,
+        color: new THREE.Color(s, s * 0.97, s * 0.93),
+      });
+    }
+    // ground dust ring
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      this.dust.spawn({
+        p: pos.clone().add(new THREE.Vector3(0, 0.2, 0)), vel: new THREE.Vector3(Math.cos(a) * 7, 0.6, Math.sin(a) * 7),
+        life: 1.4 + Math.random(), size: 0.8 * far, grow: 3, alpha: 0.4, drag: 2.2, fadeIn: true,
+        color: new THREE.Color(0.5, 0.43, 0.34),
+      });
+    }
+    // dirt debris thrown up
+    for (let i = 0; i < 26; i++) {
+      this.dust.spawn({
+        p: pos.clone(), vel: n.clone().multiplyScalar(5 + Math.random() * 8).add(new THREE.Vector3(rnd(9), 0, rnd(9))),
+        life: 1 + Math.random() * 0.7, size: (0.05 + Math.random() * 0.06) * far, alpha: 1, gravity: 9.8, drag: 0.3,
+        floor: pos.y - 0.05, color: new THREE.Color(0.22, 0.18, 0.13),
+      });
+    }
+    // scorch mark
+    if (this.decalLimit > 0) {
+      const m = new THREE.Mesh(this.decalGeo, this.decalMats.scorch);
+      m.scale.setScalar(3.2 + Math.random());
+      m.position.copy(pos).addScaledVector(n, 0.01);
+      m.lookAt(pos.clone().add(n));
+      m.rotateZ(Math.random() * Math.PI * 2);
+      m.receiveShadow = true;
+      this.decalGroup.add(m);
+      this.decals.push(m);
+      while (this.decals.length > this.decalLimit) { const old = this.decals.shift(); old.parent?.remove(old); }
+    }
+  }
+
   update(dt, groundAt) {
+    this.boomLight.intensity *= Math.max(0, 1 - dt * 14);
     this.sparks.update(dt);
     this.dust.update(dt);
     this.muzzleLight.intensity *= Math.max(0, 1 - dt * 45);

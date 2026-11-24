@@ -1,4 +1,4 @@
-# vibe-games: Kestrel Range
+# vibe-games: Kestrel
 
 A realistic browser-based tactical shooter prototype built with Three.js. **Stage 1** is a live-fire training range: six weapons, reactive steel targets from 10 m to 300 m, and photo-scanned environments.
 
@@ -10,6 +10,26 @@ npm run dev
 ```
 
 Then open the URL it prints (usually http://localhost:5173). The first run downloads about 120 MB of free (CC0) textures, sky and props from [Poly Haven](https://polyhaven.com) into `public/assets/`. That folder is git-ignored, so each computer downloads it once.
+
+## Maps
+
+| Map | Mode | What you do |
+|---|---|---|
+| **Kestrel Range** | Practice | Steel targets from 10 m to 300 m, a moving target and a plate rack |
+| **Rimba Basin** | Combat | An original rainforest valley: a river with a rope bridge and a shallow ford, a stilt-hut village, a mercenary camp and a supply landing. Kill every mercenary to clear the area. |
+
+Choose the map on the main menu. For combat you can also set the **number of enemies (1–25)** and **difficulty**:
+- **Recruit:** slow reactions, poor aim.
+- **Regular:** the default.
+- **Veteran:** fast and accurate.
+
+### How the enemies behave
+- **Patrol:** they walk the estate.
+- **Detection:** they hear your gunshots and running footsteps, and spot you gradually. Spotting is faster up close, when you move, and if they're already alert.
+- **Combat:** they react, fire in bursts with realistic inaccuracy, side-step, and fall back to cover when hurt.
+- **Hunting:** they search where they last saw you.
+
+You regenerate health after 5 seconds without taking damage. Grenades hurt them, and you.
 
 ## Controls
 
@@ -24,7 +44,8 @@ Then open the URL it prints (usually http://localhost:5173). The first run downl
 | Shift (or C) | Crouch |
 | W | Forward, sprints automatically (slows when aiming, crouching or firing) |
 | Space | Jump, or hold your breath while scoped |
-| T | Restock ammo |
+| G | Switch to grenade, then left click = throw, right click = short lob (hold the button to cook the fuse, release to throw). G again puts it away. |
+| T | Restock ammo and grenades |
 | Esc | Pause / settings |
 
 ## Weapons (all original designs)

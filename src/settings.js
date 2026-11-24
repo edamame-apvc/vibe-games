@@ -13,6 +13,9 @@ export const DEFAULTS = {
   adsSensitivity: 0.85,
   toggleAds: false,
   volume: 0.8,
+  lastMap: 'range',
+  enemyCount: 10,
+  difficulty: 'regular',
 };
 
 export function loadSettings() {

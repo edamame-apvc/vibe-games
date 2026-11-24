@@ -35,6 +35,7 @@ export class WeaponSystem {
 
     this.index = 2;           // start with the rifle
     this.prevIndex = 1;
+    this.qToGrenade = false; // Q toggles back to the grenade when it was the last thing in hand
     this.cur = this.slots[this.index];
     this.cur.model.group.visible = true;
 
@@ -70,6 +71,7 @@ export class WeaponSystem {
   equip(i) {
     if (i === this.index && !this.switching.target) return;
     if (i < 0 || i >= this.slots.length) return;
+    this.qToGrenade = false;
     this.reload = null;
     this.cycle = null;
     this.switching = { t: 0, phase: 'lower', target: i, dur: 0.2 };
@@ -94,7 +96,8 @@ export class WeaponSystem {
 
     // ── weapon selection ──
     for (const [i, s] of this.slots.entries()) if (input.hit(s.def.key)) this.equip(i);
-    if (input.hit('KeyQ')) this.equip(this.prevIndex);
+    // Q = last item: with a grenade in hand (or just put away) it toggles grenade ↔ this gun – see GrenadeSystem.
+    if (input.hit('KeyQ') && !this.grenadeBusy && !this.qToGrenade) this.equip(this.prevIndex);
     if (input.mouse.wheel) this.equip((this.index + (input.mouse.wheel > 0 ? 1 : -1) + this.slots.length) % this.slots.length);
     if ((input.hit('KeyV') || input.hit('KeyB')) && d.modes.length > 1) {
       this.cur.mode = (this.cur.mode + 1) % d.modes.length;
@@ -112,7 +115,7 @@ export class WeaponSystem {
     // ── ADS ──
     if (settings.toggleAds && input.mouse.rightPressed) this.adsToggled = !this.adsToggled;
     const wantAds = (settings.toggleAds ? this.adsToggled : input.mouse.right)
-      && !this.reload && this.switching.t >= 1 && !sprinting;
+      && !this.reload && this.switching.t >= 1 && !sprinting && !this.grenadeBusy;
     if (!wantAds && settings.toggleAds && (this.reload || sprinting)) this.adsToggled = false;
     const adsSpeed = 1 / d.adsTime;
     this.ads = Math.max(0, Math.min(1, this.ads + (wantAds ? adsSpeed : -adsSpeed * 1.3) * dt));
@@ -173,6 +176,7 @@ export class WeaponSystem {
     this.swayVel.y += (-this.sway.y * 90 - this.swayVel.y * 12) * dt - my * 0.004;
     this.sway.addScaledVector(this.swayVel, dt);
 
+    this.grenadeLower = (this.grenadeLower || 0) + ((this.grenadeBusy ? 1 : 0) - (this.grenadeLower || 0)) * Math.min(1, dt * 12);
     this.flashTimer -= dt;
     this.cur.flash.visible = this.flashTimer > 0;
 
@@ -180,7 +184,7 @@ export class WeaponSystem {
   }
 
   canFire() {
-    return this.cooldown <= 0 && !this.reload && !this.cycle && this.switching.t >= 1 && this.sprintBlend < 0.35;
+    return this.cooldown <= 0 && !this.reload && !this.cycle && this.switching.t >= 1 && this.sprintBlend < 0.35 && !this.grenadeBusy;
   }
 
   sensitivityScale(settings) {
@@ -246,6 +250,7 @@ export class WeaponSystem {
     this.effects.flashLight(muzzleWorld);
     this.effects.muzzleSmoke(muzzleWorld, forward, d.id === 'shotgun' || d.id === 'sniper' ? 2 : 1);
     this.audio.gunshot(d.sound);
+    this.onFire?.(origin);
     this.hud.shotFired();
 
     if (d.id === 'sniper') {
@@ -275,10 +280,10 @@ export class WeaponSystem {
         const zone = h.object.userData.zone;
         const f = d.falloff;
         const fall = dist <= f.start ? 1 : dist >= f.end ? f.min : 1 - (1 - f.min) * (dist - f.start) / (f.end - f.start);
-        const zoneMult = zone === 'head' ? d.headMult : zone === 'legs' ? 0.75 : 1;
+        const zoneMult = zone === 'head' ? d.headMult : zone === 'legs' || zone === 'arms' ? 0.75 : 1;
         const dmg = Math.round(d.damage * fall * zoneMult * dmgScale);
-        const res = this.targets.hit(t, zone, dmg, dist);
-        this.effects.impact('steel', h.point, normal, dist, { decalOn: h.object });
+        const res = (t.owner || this.targets).hit(t, zone, dmg, dist, dir);
+        this.effects.impact(t.surface || 'steel', h.point, normal, dist, t.surface === 'flesh' ? {} : { decalOn: h.object });
         if (res.counted) {
           const head = zone === 'head';
           this.hud.hitmarker(head, res.killed);
@@ -288,7 +293,8 @@ export class WeaponSystem {
           this.stats.longest = Math.max(this.stats.longest, dist);
           if (res.killed) {
             this.stats.downs++;
-            this.hud.feed(`${head ? 'HEADSHOT' : t.type === 'plate' ? 'PLATE DOWN' : 'TARGET DOWN'} · ${dist.toFixed(0)} m`, head);
+            const what = t.type === 'bot' ? 'ENEMY DOWN' : t.type === 'plate' ? 'PLATE DOWN' : 'TARGET DOWN';
+            this.hud.feed(`${head ? 'HEADSHOT' : what} · ${dist.toFixed(0)} m`, head);
           }
         }
         return { point: h.point, target: t };
@@ -324,7 +330,7 @@ export class WeaponSystem {
 
   startReload() {
     const d = this.def, s = this.cur;
-    if (this.reload || this.switching.t < 1 || s.ammo >= d.mag || s.reserve <= 0) return;
+    if (this.reload || this.switching.t < 1 || this.grenadeBusy || s.ammo >= d.mag || s.reserve <= 0) return;
     if (this.cycle && this.cycle.kind === 'bolt') return;
     const empty = s.ammo === 0;
     if (d.shellReload) {
@@ -516,6 +522,10 @@ export class WeaponSystem {
       rot.z += 0.12 * w * (1 - a * 0.6);
       pos.y -= 0.01 * w;
     }
+
+    // grenade in hand: gun drops out of view
+    const gl = ease(this.grenadeLower || 0);
+    pos.y -= 0.38 * gl; pos.x += 0.05 * gl; rot.x -= 0.5 * gl;
 
     // switching
     const s = this.switching;

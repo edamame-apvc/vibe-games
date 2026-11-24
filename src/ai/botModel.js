@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries as mergeRaw } from 'three/addons/utils/BufferGeometryUtils.js';
+
+// RoundedBoxGeometry is non-indexed while cylinders/spheres are indexed – normalise before merging.
+const mergeGeometries = (list) => mergeRaw(list.map((g) => (g.index ? g.toNonIndexed() : g)));
 
 // Original procedural "mercenary" character: helmet, plate carrier with
 // pouches, camo fatigues, gloves, boots and a carbine. Rigid body parts on a
@@ -135,8 +138,9 @@ export function createMercenary(variant = 0) {
   const muzzle = grp(gunMount, 0, 0.01, -0.48);
 
   // static aiming arm pose
-  armR.sh.rotation.set(-1.05, 0, 0.18); armR.el.rotation.set(-1.0, 0, 0);
-  armL.sh.rotation.set(-1.25, 0, -0.55); armL.el.rotation.set(-0.55, 0, 0);
+  // (+X rotation swings an arm forward; the model faces -Z)
+  armR.sh.rotation.set(1.0, 0, -0.12); armR.el.rotation.set(0.95, 0, 0);
+  armL.sh.rotation.set(1.3, 0, 0.55); armL.el.rotation.set(0.45, 0, 0);
 
   /** s: { phase, speed(m/s), crouch 0..1, aimPitch, dead 0..1, deadDir ±1 } */
   function pose(s) {
@@ -162,7 +166,7 @@ export function createMercenary(variant = 0) {
     body.position.y = d * 0.12;
     body.position.z = d * 0.25 * s.deadDir;
     if (d > 0) {
-      armR.sh.rotation.x = -1.05 + d * 0.8; armL.sh.rotation.x = -1.25 + d * 1.0;
+      armR.sh.rotation.x = 1.0 - d * 0.8; armL.sh.rotation.x = 1.3 - d * 1.0;
       legR.kn.rotation.x += d * 0.4;
     }
   }

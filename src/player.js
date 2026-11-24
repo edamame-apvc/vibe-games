@@ -8,8 +8,10 @@ const STEP = 0.42;
 const GRAVITY = 13.5;
 
 export class Player {
-  constructor(colliders, audio, { collision = null, bounds = BOUNDS } = {}) {
+  constructor(colliders, audio, { collision = null, bounds = BOUNDS, groundAt = null, speedAt = null } = {}) {
     this.colliders = colliders;
+    this.groundAt = groundAt; // terrain height (maps with hills); null = flat ground at y 0
+    this.speedAt = speedAt;   // movement multiplier, e.g. wading through a river
     this.collision = collision; // polygon/segment world (city maps)
     this.bounds = bounds;
     this.audio = audio;
@@ -27,6 +29,8 @@ export class Player {
     this.landDip = 0;
     this.landVel = 0;
     this.speed = 0;
+    this.health = 100;
+    this.alive = true;
     this.clock = 0;
     this._box = new THREE.Box3();
   }
@@ -63,6 +67,7 @@ export class Player {
     if (this.crouching) maxSpeed = 2.2;
     if (ads) maxSpeed *= 0.58;
     maxSpeed *= mobility;
+    if (this.speedAt) maxSpeed *= this.speedAt(this.pos.x, this.pos.z);
 
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
     const wx = fx * cos + fz * sin;
@@ -88,9 +93,10 @@ export class Player {
 
     const prevY = this.pos.y;
     const wasAir = !this.onGround;
+    const grounded = this.onGround;
     const fallSpeed = -this.vel.y;
     this.pos.y += this.vel.y * dt;
-    this.resolveVertical(prevY);
+    this.resolveVertical(prevY, grounded);
     if (this.onGround && wasAir && fallSpeed > 2) {
       this.landVel -= Math.min(fallSpeed, 9) * 0.35;
       this.audio.footstep(6, false);
@@ -148,8 +154,8 @@ export class Player {
     return this.colliders.some((b) => overlaps(pb, b));
   }
 
-  resolveVertical(prevY) {
-    let floor = 0;
+  resolveVertical(prevY, grounded = false) {
+    let floor = this.groundAt ? this.groundAt(this.pos.x, this.pos.z) : 0;
     const x0 = this.pos.x - RADIUS, x1 = this.pos.x + RADIUS, z0 = this.pos.z - RADIUS, z1 = this.pos.z + RADIUS;
     for (const b of this.colliders) {
       if (x1 <= b.min.x || x0 >= b.max.x || z1 <= b.min.z || z0 >= b.max.z) continue;
@@ -158,6 +164,8 @@ export class Player {
         this.pos.y = b.min.y - this.height; this.vel.y = 0;                          // head bump
       }
     }
+    // On terrain, stay glued to the ground when walking downhill instead of hopping off every slope.
+    if (this.groundAt && grounded && this.vel.y <= 0 && this.pos.y > floor && this.pos.y - floor < 0.5) this.pos.y = floor;
     if (this.pos.y <= floor) {
       this.pos.y = floor;
       if (this.vel.y < 0) this.vel.y = 0;
